@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "commonjs",
+    "outDir": "./dist",          // 编译后的文件输出目录
+    "rootDir": "./src",          // 源代码文件夹
+    "strict": true,              // 启用严格模式
+    "esModuleInterop": true,     // 允许与 CommonJS 模块的互操作
+    "skipLibCheck": true,        // 跳过库文件类型检查（减少构建时间）
+    "forceConsistentCasingInFileNames": true, // 保证文件名大小写一致
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*"],        // 包含 src 文件夹内的所有 TypeScript 文件
+  "exclude": ["node_modules"]     // 排除 node_modules 文件夹
+}
