@@ -3,24 +3,23 @@ import { MessageInterface } from "wechaty/impls";
 import { IUserService } from "./user";
 import { Conversation, IConversationService } from "./conversation";
 import OpenAI from "openai";
-import { config } from 'dotenv';
-
+import { config } from "dotenv";
 
 export interface IMessageService {
-    handleReceiveMessage(imMessage:MessageInterface): Promise<void>;
-    sendMessage(conversation: Conversation, message: MessageInterface): Promise<void>;
+  handleReceiveMessage(imMessage: MessageInterface): Promise<void>;
+  sendMessage(
+    conversation: Conversation,
+    message: MessageInterface
+  ): Promise<void>;
 }
 
 config();
-
-
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const model = 'gpt-4o'
-
+const model = "gpt-4o";
 
 async function getGptTextAnswer(question: string): Promise<string> {
   const chatCompletion = await client.chat.completions.create({
@@ -41,70 +40,87 @@ async function getGptTextAnswer(question: string): Promise<string> {
 //   return imageUrl || "";
 // }
 
-
-export const IMessageService = Symbol.for('IMessageService');
+export const IMessageService = Symbol.for("IMessageService");
 
 @injectable()
 export class MessageService {
-    private userService: IUserService;
-    private conversationService: IConversationService;
-    constructor(@inject(IUserService) userService: IUserService,@inject(IConversationService) conversationService: IConversationService) {
-        this.userService = userService
-        this.conversationService = conversationService
+  private userService: IUserService;
+  private conversationService: IConversationService;
+  readonly messageLimit = 15;
+  constructor(
+    @inject(IUserService) userService: IUserService,
+    @inject(IConversationService) conversationService: IConversationService
+  ) {
+    this.userService = userService;
+    this.conversationService = conversationService;
+  }
+
+  public async handleReceiveMessage(imMessage: MessageInterface) {
+    const talker = imMessage.talker();
+    this.userService.saveUser(talker);
+    const text = imMessage.text();
+    console.log("talker", JSON.stringify(talker));
+    console.log("text", text);
+    // 没有消息和发送者，直接返回
+    if (!text || !talker) return;
+
+    const conversation = this.conversationService.getConversation(talker.id);
+    if (!conversation && (text === "start" || text === "开始")) {
+      this.conversationService.createConversation(talker.id);
+      imMessage.say("开启gpt对话了，开始对话吧");
+    } else if (text === "clear" || text === "结束") {
+      this.conversationService.clearMessagesFromConversation(talker.id);
+      imMessage.say("已清空对话上下文，如需开启对话，请发送 开始");
+    } else if (conversation) {
+      const updatedConversation =
+        this.conversationService.pushQuestionOnConversation(talker.id, text);
+      this.sendMessage(updatedConversation, imMessage);
     }
 
+    // let isEmit = false;
+    // for (const word of emitWords) {
+    //   if (text.startsWith(word)) {
+    //     isEmit = true;
+    //   }
+    // }
+    // if (!isEmit) {
+    //   return;
+    // }
+    // const query = omitEmitWords(emitWords, text);
+    // // 策略模式
+    // if (query.includes("画")) {
+    //   const url = await getGptImageAnswer(query);
+    //   const fileBox = FileBox.fromUrl(url);
+    //   console.log("start", fileBox);
+    //   message.say(fileBox);
+    // } else {
+    //   const answer = await getGptTextAnswer(query);
+    //   console.log("message", message.text());
+    //   message.say(answer);
+    // }
+  }
 
-    public async handleReceiveMessage(imMessage:MessageInterface) {
-        const talker = imMessage.talker();
-        this.userService.saveUser(talker);
-        const text = imMessage.text();
-        console.log("talker", JSON.stringify(talker));
-        console.log("text", text)
-        // 没有消息和发送者，直接返回
-        if (!text || !talker) return
-        
-        const conversation = this.conversationService.getConversation(talker.id);
-        if (!conversation && text === 'start') {
-           this.conversationService.createConversation(talker.id)        
-           imMessage.say("开启gpt对话了，开始对话吧");
-        } else if (conversation) {
-           const updatedConversation = this.conversationService.pushQuestionOnConversation(talker.id, text);
-           this.sendMessage(updatedConversation, imMessage);
-        }
-
-              // let isEmit = false;
-      // for (const word of emitWords) {
-      //   if (text.startsWith(word)) {
-      //     isEmit = true;
-      //   }
-      // }
-      // if (!isEmit) {
-      //   return;
-      // }
-      // const query = omitEmitWords(emitWords, text);
-      // // 策略模式
-      // if (query.includes("画")) {
-      //   const url = await getGptImageAnswer(query);
-      //   const fileBox = FileBox.fromUrl(url);
-      //   console.log("start", fileBox);
-      //   message.say(fileBox);
-      // } else {
-      //   const answer = await getGptTextAnswer(query);
-      //   console.log("message", message.text());
-      //   message.say(answer);
-      // }
+  public async sendMessage(
+    conversation: Conversation,
+    message: MessageInterface
+  ): Promise<void> {
+    const chatCompletion = await client.chat.completions.create({
+      messages: conversation.messages,
+      model,
+    });
+    const gptReply = chatCompletion.choices[0].message.content;
+    message.say(chatCompletion.choices[0].message.content || "gpt error");
+    if (conversation.messages.length > this.messageLimit) {
+      message.say("消息数量超过限制，已自动清空上下文");
+      this.conversationService.clearMessagesFromConversation(conversation.id);
+      return;
     }
-
-    public async sendMessage(conversation: Conversation, message: MessageInterface): Promise<void> {
-        const chatCompletion = await client.chat.completions.create({
-            messages: conversation.messages,
-            model,
-          });
-        const gptReply = chatCompletion.choices[0].message.content;
-        message.say(chatCompletion.choices[0].message.content || "gpt error");
-        // 把模型的回复也存下来
-        if (gptReply) {
-            this.conversationService.pushAnswerOnConversation(conversation.id, gptReply);
-        }
+    // 把模型的回复也存下来
+    if (gptReply) {
+      this.conversationService.pushAnswerOnConversation(
+        conversation.id,
+        gptReply
+      );
     }
+  }
 }
